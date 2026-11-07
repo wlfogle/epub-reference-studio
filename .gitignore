@@ -1,0 +1,7 @@
+/target/
+/dist/
+/src-tauri/gen/
+*.epub
+*.txt
+!LICENSE
+__pycache__/

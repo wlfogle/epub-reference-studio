@@ -1,0 +1,6 @@
+{
+  "identifier": "main",
+  "description": "Local application commands and event notifications",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

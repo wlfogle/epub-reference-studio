@@ -1,0 +1,19 @@
+[package]
+name = "epub-reference-studio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+default-run = "epub-reference-studio"
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
+
+[build-dependencies]
+tauri-build = "2"
+
+[dependencies]
+epub-reference-core = { path = "../crates/epub-core" }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde_json = "1"
+url = "2"

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EPUB Reference Studio</title>
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header>
+    <div><span class="logo">ER</span><h1>EPUB Reference Studio</h1><span class="tag">TEXT, NOT METADATA</span></div>
+    <p>Find damage inside books. Compare a matching reference. Keep the original.</p>
+  </header>
+  <div id="status" role="status" aria-live="polite">Opening private workspace…</div>
+  <div id="error" role="alert" hidden></div>
+  <main>
+    <aside>
+      <nav><button id="libraryTab" class="active">Library</button><button id="jobsTab">Saved reviews</button></nav>
+      <div class="controls">
+        <label for="libraryPath">Library folder</label>
+        <input id="libraryPath" value="/media/loufogle/Data/Calibre Library">
+        <div class="row"><button id="browseLibrary">Browse</button><button id="scan" class="primary">Scan text</button><button id="cancel" hidden>Stop</button></div>
+        <button id="openBook">Open an EPUB…</button>
+        <label for="filter">Filter books</label><input id="filter" type="search" placeholder="Title, author or path">
+        <label class="check"><input id="flaggedOnly" type="checkbox"> Only flagged / unreadable books</label>
+        <div class="row"><button id="researchBatch">Research checked</button><button id="clearChecks">Clear checks</button></div>
+        <small>Online research sends selected titles/authors, never the EPUB. Candidates require review.</small>
+      </div>
+      <div id="librarySummary" class="summary"></div>
+      <details id="ollamaPanel">
+        <summary>Local Ollama assistant</summary>
+        <label for="ollamaEndpoint">Loopback endpoint</label>
+        <input id="ollamaEndpoint" value="http://127.0.0.1:11434">
+        <label for="ollamaModel">Installed text model</label>
+        <select id="ollamaModel"><option value="qwen3.5:4b">qwen3.5:4b</option></select>
+        <div class="row"><button id="connectOllama">Connect / list models</button><button id="saveOllama">Save model</button></div>
+        <small id="ollamaStatus">No model downloads. Inference runs only when requested.</small>
+      </details>
+      <div id="books" class="book-list"></div>
+      <button id="moreBooks" hidden>Show 100 more</button>
+      <footer id="workspace"></footer>
+    </aside>
+    <article id="detail">
+      <section class="welcome">
+        <span class="eyebrow">A CLEAN REFERENCE, NOT A GUESS</span>
+        <h2>Repair the text you actually read.</h2>
+        <p>Scan a whole library or open one EPUB. Text is reconstructed across inline formatting, so broken and joined words are visible to the analyzer.</p>
+        <div class="steps"><div><b>1 · Inspect</b><p>Find suspicious spacing and OCR artifacts inside XHTML.</p></div><div><b>2 · Find a reference</b><p>Download an available Gutenberg text or import a matching acquired edition. Catalogue records alone are not references.</p></div><div><b>3 · Review & export</b><p>Select source-backed changes. Export a separate EPUB and change report. Your Calibre originals are never replaced.</p></div></div>
+        <p class="notice">A different edition can contain legitimate differences. The app checks identity and textual overlap, but your review—not a confidence label—decides the corrections.</p>
+      </section>
+    </article>
+  </main>
+</body>
+</html>
