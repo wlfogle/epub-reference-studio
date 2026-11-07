@@ -70,6 +70,7 @@ Limits: 128 MiB compressed EPUB, 256 MiB total declared expansion, 32 MiB indivi
 - `node --check ui/app.js` (optional syntax check when Node is installed)
 - `/usr/bin/python3 tests/ui_webkit.py` (installed GTK/WebKit introspection and a graphical display required)
 - `python3 tests/sigil_native.py` (opt-in real X11 desktop test; requires built release, installed Sigil, xdotool, ImageMagick and tesseract; keep keyboard/mouse idle)
+- `python3 tests/sigil_native.py --edit` (same isolated fixture, plus a real Sigil keyboard edit, Ctrl+S and native saved-copy re-analysis)
 - `cargo test -p epub-reference-core live_gutenberg_reference_download -- --ignored --nocapture` (explicit public-domain network check)
 - `cargo test -p epub-reference-core live_local_ollama_assessment_preserves_review_and_uses_cache -- --ignored --nocapture` (explicit installed local model check; fictional excerpts)
 
@@ -77,5 +78,7 @@ Offline tests create synthetic EPUBs only. They exercise actual parsing, cross-s
 
 ### Verified build
 On the development Pop!_OS workstation: 20 offline Rust tests, strict Clippy, Python/JavaScript checks, the WebKit UI workflow and the real native-to-Flatpak Sigil handoff passed. The Sigil test uses only a private synthetic EPUB, verifies a real editor window for the working copy and an unchanged source SHA-256, and closes only its own fixture windows. Prior live Gutenberg discovery/download and actual local Ollama assessment/cache tests also passed.
+
+The `--edit` round trip also passed with installed Flatpak Sigil 2.8.5: it inserts one space to change `ofVarnal` to `of Varnal` in the fixture's Code View, saves through Sigil, checks the resulting EPUB's ZIP CRC/XML/text, then confirms and invokes Studio's real **Re-analyze saved Sigil copy** control. The visible UI and saved review both change from two findings to one; the remaining sentence-spacing error is an intentional control. The test verifies that the new review hash matches the saved file, the working-copy binding is retained, no duplicate copy is created and the original hash stays unchanged. It does not read or overwrite the clipboard. Screenshots and `verification.json` remain in the printed owner-private temporary evidence directory; production libraries and existing editor windows are not used.
 
 The optimized native application was built, installed and opened on the selected Calibre EPUB. Its read-only scan reported 196 heuristic findings with an unchanged original SHA-256. Those findings are not 196 certified errors, and no production book was automatically corrected or replaced.
