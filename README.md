@@ -1,18 +1,88 @@
 # EPUB Reference Studio
-A Rust/Tauri 2 desktop application for **errors inside EPUB text**, not Calibre metadata. Scan a library, find an available full-text reference, compare aligned text, review corrections and export a separate corrected EPUB plus a JSON change report.
+**Find and repair OCR and spacing problems inside EPUB books, with reference text and human review.**
 
-## Build and install
-On Linux, install Rust/Cargo, Python 3, a C toolchain, pkg-config and the GTK3/WebKitGTK 4.1 development packages. The tested environment already provides these; no Docker or server is required. Rust 1.99 is tested. The UI is embedded vanilla JavaScript/CSS, so no Node package installation is needed.
+EPUB Reference Studio is a Linux desktop application built with **Rust and Tauri 2**. It examines the actual XHTML text inside ebooks—not just Calibre titles, authors or series metadata. Use it to inspect one book or scan a library, compare an available matching reference, and export reviewed corrections without replacing your originals.
 
-Run `python3 scripts/build.py`, then `python3 scripts/install_launcher.py`. Open **EPUB Reference Studio** from the application menu. Use `--offline` on the build script only when all locked Cargo dependencies are cached.
+## What you can do
+- **Find suspect passages:** detect joined/split words, missing sentence spaces, OCR artifacts and possible embedded page headers, including text split across formatting tags.
+- **Compare real references:** discover/download available Gutenberg editions or import an acquired reference EPUB/UTF-8 text file. Open Library results are catalogue leads, not full-text downloads.
+- **Review changes side by side:** inspect original/reference differences and select the corrections you want.
+- **Ask a local model:** optionally connect Ollama for bounded advisory assessments. Model output never becomes a reference or automatically approves edits.
+- **Edit in Sigil:** open a preserved working copy, use chapter/line/search hints, save manual edits and re-analyze the saved copy.
+- **Keep originals intact:** export a new EPUB and JSON change report outside the Calibre library. Saved reviews and research queues can be resumed.
 
-The installed executable is `~/.local/lib/epub-reference-studio/epub-reference-studio`. Source builds run from `target/release/epub-reference-studio`. Its optional `--open /absolute/path/book.epub` argument analyzes a selected book read-only and opens the saved review. `--inspect /absolute/path/book.epub` emits a read-only JSON analysis for diagnostics; that output contains private text excerpts and should not be published.
+**Important:** a flagged passage is not necessarily an error, and another edition may contain intentional differences. Reference availability varies; many modern books have no freely downloadable matching text. Review identity, edition and proposed corrections before exporting. See [reference sources](#online-reference-sources) and [safety](#preservation-and-safety).
 
-After installing an update, close the old Studio window normally and reopen it through the application menu. Atomic executable replacement does not update an already-running process. Saved reviews, reference caches and Ollama settings stay in the private application workspace; do not delete that workspace as part of test cleanup. The installed executable, icon and menu entry do not depend on the checkout or temporary test directories.
+[Quick start](#quick-start) · [Workflow](#workflow) · [Sigil](#edit-flagged-passages-in-sigil) · [Ollama](#local-ollama-assistant) · [Tests](#tests) · [MIT license](LICENSE)
 
-The finalized workstation deployment was launched through its desktop entry and the running/installed executable hashes were verified against the release build. Existing review/configuration file hashes were unchanged. Four confirmed synthetic native-test workspaces and two temporary app captures/logs were removed only after their processes released them; unrelated temporary files, real books and private backups were preserved. That finalized launch writes diagnostics to `~/.local/state/epub-reference-studio/app.log` (0600, enclosing directory 0700); subsequent desktop launches may instead use the desktop session's logging.
+## Quick start
+### 1. Install prerequisites
+The tested target is **Pop!_OS 22.04 / Linux with GTK 3 and WebKitGTK 4.1**. Windows and macOS builds are not verified.
 
-Native tests deliberately retain their printed `epub-sigil-native-*` evidence directories until cleanup. Before deleting one, verify ownership, its synthetic fixture identity, absence of symlinks/unexpected files and absence of active editor/process references. Test evidence is disposable; production data is not.
+Required:
+- A current stable Rust/Cargo toolchain; **Rust 1.99** is tested. Install it using the instructions at [rustup.rs](https://rustup.rs/).
+- Python 3, Git, a C/C++ build toolchain and pkg-config.
+- GTK 3, WebKitGTK 4.1 and librsvg development packages.
+
+On Pop!_OS/Ubuntu with Nala installed:
+```sh
+sudo nala install build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev librsvg2-dev python3 git
+```
+If you use another package frontend, install the same packages through it. Package names may differ on other distributions.
+
+**Optional:** Sigil for manual editing, Ollama plus an installed text-generation model for AI advice, and an internet connection for online reference research. Calibre is not required to analyze a standalone EPUB. No Docker, Node/npm build step, hosted AI account or API key is required.
+
+### 2. Clone, build and install
+Run these commands from the directory where you keep repositories:
+```sh
+git clone https://github.com/wlfogle/epub-reference-studio.git
+cd epub-reference-studio
+python3 scripts/build.py
+python3 scripts/install_launcher.py
+```
+The build uses locked Cargo dependencies and embeds the frontend. Installation is **per user** and does not require sudo. It copies the executable/icon and adds **EPUB Reference Studio** to the application menu.
+
+Use `python3 scripts/build.py --offline` only when all locked Cargo dependencies are already cached. To run the built app directly without installing the menu entry:
+```sh
+./target/release/epub-reference-studio
+```
+
+### 3. Try one book first
+1. Launch **EPUB Reference Studio** from your application menu.
+2. Click **Open an EPUB…** and choose a book, or use **Browse** to select your own library folder and **Scan text**. The displayed default folder need not match your system.
+3. Inspect **Suspect text**. For source-backed corrections, open **Reference sources**, search online or import a matching reference, verify its edition and click **Compare actual text**.
+4. In **Review & export**, select a small set of verified changes and export to a directory outside Calibre. Alternatively, use **Open in Sigil** for manual work on a separate copy.
+5. Open the resulting book in your reader and check it before importing it into Calibre yourself.
+
+An unavailable reference or Ollama service does not prevent read-only scanning. Neither metadata records nor AI suggestions are silently substituted for missing reference text. [Detailed workflow](#workflow)
+
+### Optional: enable local Ollama advice
+Install/run [Ollama](https://ollama.com/) separately. If you want the default model and do not already have it, explicitly download it:
+```sh
+ollama pull qwen3.5:4b
+```
+This command downloads model weights; Studio never downloads them automatically. Start Ollama through your system service or `ollama serve` if it is not already running—do not start a second server on the same port.
+
+In Studio, expand **Local Ollama assistant**, connect to `http://127.0.0.1:11434`, choose an installed model and click **Save model**. Inference runs only when you click an **Ask Ollama** action. See [Ollama details](#local-ollama-assistant).
+
+### Optional: use Sigil
+Install native [Sigil](https://sigil-ebook.com/) or its `com.sigil_ebook.Sigil` Flatpak. Studio detects either installation. The editor is optional; it is not needed for reference comparison/export. See the [Sigil workflow and navigation limits](#edit-flagged-passages-in-sigil).
+
+## Updating an existing installation
+Close Studio normally, then run from your checkout:
+```sh
+git pull --ff-only
+python3 scripts/build.py
+python3 scripts/install_launcher.py
+```
+Reopen it through the application menu. Replacing the executable does not update an already-running process. Keep your private workspace to retain reviews, references and model settings.
+
+## Installed files and private data
+- Executable: `~/.local/lib/epub-reference-studio/epub-reference-studio`
+- Application-menu entry: `~/.local/share/applications/epub-reference-studio.desktop` (under `$XDG_DATA_HOME` when configured)
+- Saved reviews/settings/references: `~/.local/share/org.nexus.epub-reference-studio` by default; `EPUB_STUDIO_WORKSPACE` can select an isolated workspace outside Calibre.
+
+The installed app does not depend on the checkout or test directories. To open a selected book directly, use `--open "/absolute/path/book.epub"` on the built/installed executable. `--inspect "/absolute/path/book.epub"` emits read-only JSON analysis containing private excerpts; do not publish that output. See [data preservation](#preservation-and-safety) before cleaning caches or workspaces.
 
 ## Workflow
 1. **Scan text:** select a directory or open a single EPUB. Scanning reads the OPF and spine XHTML, reconstructs words across inline formatting, and flags likely joined words, missing punctuation spacing, digit/letter OCR artifacts, broken hyphenation and split words corroborated elsewhere in the book. Findings are candidates, not certified errors. English-oriented heuristics are intentionally conservative; an ordinary-word OCR substitution can require a reference.
@@ -83,6 +153,10 @@ Limits: 128 MiB compressed EPUB, 256 MiB total declared expansion, 32 MiB indivi
 Offline tests create synthetic EPUBs only. They exercise actual parsing, cross-span corrections, entities/Unicode, alignment, false-identity rejection, unchanged-reference behavior, resource preservation, stale hashes, no-overwrite and Calibre-directory refusal, saved reviews and cancellation. The WebKit test drives the real UI with fictional IPC fixtures and checks safe text rendering, online-source UI, confirmation, diff selection and export. The opt-in live test discovers and downloads a real matching public-domain book through the production network code.
 
 ### Verified build
+The finalized workstation deployment was launched through its desktop entry and the running/installed executable hashes were verified against the release build. Existing review/configuration file hashes were unchanged. Four confirmed synthetic native-test workspaces and two temporary app captures/logs were removed only after their processes released them; unrelated temporary files, real books and private backups were preserved. That finalized launch writes diagnostics to `~/.local/state/epub-reference-studio/app.log` (0600, enclosing directory 0700); subsequent desktop launches may instead use the desktop session's logging.
+
+Native tests deliberately retain their printed `epub-sigil-native-*` evidence directories until cleanup. Before deleting one, verify ownership, its synthetic fixture identity, absence of symlinks/unexpected files and absence of active editor/process references. Test evidence is disposable; production data is not.
+
 Final verification rerun on **2026-11-07**, against source HEAD `ac351d4`:
 - Workspace formatting and strict Clippy (`--workspace --all-targets --features custom-protocol -- -D warnings`) passed.
 - Full offline workspace tests passed: **20 tests**, zero failures. Both normally ignored integration tests were then run explicitly and passed: real Gutenberg reference acquisition and local Ollama assessment/cache preservation.
