@@ -1,5 +1,5 @@
 use epub_reference_core::{
-    book, ollama, online,
+    book, ollama, online, sigil,
     workspace::{Job, Workspace},
 };
 use std::{
@@ -56,6 +56,7 @@ async fn operation(
                 "jobs": workspace.jobs().map_err(error)?,
                 "workspace": workspace.path(),
                 "ollama": workspace.ai_config().map_err(error)?,
+                "sigil": sigil::detect(),
             }),
             "scan" => {
                 cancel.store(false, Ordering::Relaxed);
@@ -67,6 +68,30 @@ async fn operation(
                 serde_json::to_value(library).map_err(|e| e.to_string())?
             }
             "analyze" => value(workspace.analyze(&PathBuf::from(text("path")?)))?,
+            "analyze_sigil" => value(workspace.analyze_sigil(text("id")?))?,
+            "open_sigil" => {
+                let editor = sigil::detect().ok_or("Sigil not found. Install native Sigil or its com.sigil_ebook.Sigil Flatpak.")?;
+                let target = serde_json::from_value(args["target"].clone()).map_err(error)?;
+                let mut handoff = workspace.prepare_sigil(text("id")?, target).map_err(error)?;
+                let active = workspace.jobs().map_err(error)?.into_iter()
+                    .filter_map(|j| j.sigil).filter(|s| s.path == handoff.path)
+                    .filter_map(|s| s.process).any(|p| sigil::running(&p));
+                if active {
+                    handoff.notice = format!("This copy is already open in the Sigil process launched by this app; switch to that window. {}", handoff.notice);
+                } else {
+                    use std::os::unix::fs::OpenOptionsExt;
+                    let log = std::fs::OpenOptions::new().create(true).append(true).mode(0o600)
+                        .open(workspace.path().join("sigil-launch.log")).map_err(error)?;
+                    let process = sigil::launch(&editor, &handoff.path, log).map_err(error)?;
+                    workspace.record_sigil_process(text("id")?, &handoff.path, process).map_err(error)?;
+                }
+                handoff.editor = editor.label;
+                serde_json::to_value(handoff).map_err(error)?
+            }
+            "copy_sigil_search" => {
+                sigil::copy_search(text("text")?).map_err(error)?;
+                serde_json::Value::Null
+            }
             "models" => {
                 let config = serde_json::from_value(args["config"].clone()).map_err(error)?;
                 serde_json::to_value(ollama::models(&config).map_err(error)?).map_err(error)?

@@ -2,6 +2,7 @@ pub mod align;
 pub mod book;
 pub mod ollama;
 pub mod online;
+pub mod sigil;
 pub mod workspace;
 
 use serde::{Deserialize, Serialize};
@@ -32,6 +33,10 @@ pub struct Finding {
     pub location: String,
     pub context: String,
     pub explanation: String,
+    #[serde(default)]
+    pub start: Option<usize>,
+    #[serde(default)]
+    pub end: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

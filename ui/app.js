@@ -6,7 +6,15 @@ const invoke = (command, args = {}) => {
 };
 const op = (action, args = {}) => invoke("operation", { action, args });
 const $ = id => document.getElementById(id);
-const state = { library: { books: [] }, jobs: [], job: null, tab: "library", view: "findings", busy: false, checked: new Set(), limit: 100, stopBatch: false };
+const state = { library: { books: [] }, jobs: [], job: null, tab: "library", view: "findings", busy: false, checked: new Set(), limit: 100, stopBatch: false, sigilHandoff: null, revealSigil: false };
+async function openSigil(target) {
+  const id = state.job.id;
+  if (target.kind === "export" && !window.confirm("Open this corrected export for editing? Save/close an existing Sigil window for this file first to avoid parallel edits.")) return;
+  const handoff = await op("open_sigil", { id, target });
+  state.job = await op("job", { id });
+  state.sigilHandoff = { ...handoff, jobId: id };
+  state.revealSigil = true;
+}
 async function listModels() {
   const config = { endpoint: $("ollamaEndpoint").value.trim(), model: $("ollamaModel").value };
   const models = await op("models", { config });
@@ -51,9 +59,11 @@ async function run(label, action) {
     state.busy = false; document.body.classList.remove("busy");
     for (const b of document.querySelectorAll("button")) b.disabled = false;
     $("cancel").hidden = true; renderList(); if (state.job) renderJob();
+    if (state.revealSigil) { $("detail").scrollTop = 0; state.revealSigil = false; }
   }
 }
 function setJob(job) {
+  if (state.job?.id !== job.id) state.sigilHandoff = null;
   state.job = job;
   state.jobs = [job, ...state.jobs.filter(j => j.id !== job.id)];
   state.view = job.comparison ? "changes" : "findings";
@@ -96,6 +106,10 @@ function renderJob() {
   bar.append(el("span", j.findings.length + " heuristic findings"), el("span", (j.comparison?.edits.length || 0) + " reference differences"),
     el("span", j.exports.length + " corrected exports"));
   detail.append(bar);
+  const editorActions = el("div", undefined, "row");
+  editorActions.append(button("Open editable copy in Sigil", async () => openSigil({ kind: "book" })));
+  detail.append(editorActions);
+  if (j.sigil || state.sigilHandoff?.jobId === j.id) renderSigil(detail, j);
   const tabs = el("div", undefined, "tabs");
   for (const [key, title] of [["findings", "Suspect text"], ["reference", "Reference sources"], ["changes", "Review & export"]]) {
     const b = button(title, async () => { state.view = key; });
@@ -119,13 +133,39 @@ function renderJob() {
     detail.append(card);
   }
 }
+function renderSigil(detail, j) {
+  const handoff = state.sigilHandoff?.jobId === j.id ? state.sigilHandoff : null;
+  const card = el("section", undefined, "card");
+  card.append(el("h3", "Sigil editing handoff"), info(handoff?.path || j.sigil.path, "path"),
+    info("Save edits in this working copy. The Calibre original is not opened for editing.", "notice"));
+  if (handoff) {
+    if (handoff.member) card.append(info(`Book Browser → ${handoff.member}${handoff.line ? " · source line hint " + handoff.line : ""}`));
+    card.append(info(handoff.notice, "context"));
+    if (handoff.context) card.append(info(handoff.context, "context"));
+    if (handoff.search_text) {
+      const label = el("label", "Normal-mode search text (raw XHTML excerpt)");
+      const search = el("input"); search.readOnly = true; search.value = handoff.search_text;
+      search.setAttribute("aria-label", "Sigil search text");
+      search.onclick = () => search.select();
+      card.append(label, search, button("Copy search text", async () => {
+        await op("copy_sigil_search", { text: handoff.search_text });
+      }));
+    }
+  } else card.append(info("Use a finding's Open in Sigil button for current chapter/line/search details. Sigil has no direct CLI passage-jump option.", "context"));
+  if (j.sigil) card.append(info("Tracked working copy for re-analysis: " + j.sigil.path, "path"), button("Re-analyze saved Sigil copy", async () => {
+    if (!window.confirm("Save your edits in Sigil first (Ctrl+S). Analyze that saved copy without modifying the original?")) return;
+    setJob(await op("analyze_sigil", { id: j.id })); state.view = "findings";
+  }, true));
+  detail.append(card);
+}
 function renderFindings(detail, j) {
   detail.append(info("These are suspects, not automatic corrections. A clean reference can reveal additional errors such as ordinary words split by OCR.", "notice"));
   const card = el("section", undefined, "card");
   card.append(el("h3", "Inside the EPUB"));
-  for (const f of j.findings.slice(0, 500)) {
+  for (const [index, f] of j.findings.slice(0, 500).entries()) {
     const item = el("div", undefined, "finding");
     item.append(el("span", f.kind, "kind"), info(f.location, "path"), info(f.context, "context"), info(f.explanation, "context"));
+    item.append(button("Open in Sigil", async () => openSigil({ kind: "finding", index })));
     card.append(item);
   }
   if (!j.findings.length) card.append(info("No heuristic suspects. This does not prove the text is error-free; compare a reference to find ordinary-word errors."));
@@ -213,12 +253,20 @@ function renderChanges(detail, j) {
       state.job = await op("select", { id: j.id, selected: [...selected] }); state.view = "changes";
     }));
     head.append(check, el("span", edit.kind, "kind"), info(edit.location, "path"));
+    head.append(button("Open in Sigil", async () => openSigil({ kind: "change", id: edit.id })));
     const grid = el("div", undefined, "compare-grid");
     grid.append(el("div", edit.before || "∅ (insertion)", "before"), el("div", edit.after || "∅ (remove)", "after"));
     item.append(head, grid, info(edit.context, "context")); holder.append(item);
   }
   detail.append(holder);
-  if (j.exports.length) detail.append(el("h3", "Previous corrected copies"), ...j.exports.map(p => info(p, "path")));
+  if (j.exports.length) {
+    detail.append(el("h3", "Previous corrected copies"));
+    for (const path of j.exports) {
+      const row = el("div", undefined, "row");
+      row.append(info(path, "path"), button("Open export in Sigil", async () => openSigil({ kind: "export", path })));
+      detail.append(row);
+    }
+  }
 }
 $("libraryTab").onclick = () => { state.tab = "library"; renderList(); };
 $("connectOllama").onclick = () => run("Connecting to local Ollama", listModels);

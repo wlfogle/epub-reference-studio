@@ -298,6 +298,117 @@ fn library_scan_is_read_only_cached_and_cancellable() {
 }
 
 #[test]
+fn sigil_reuses_private_copy_and_preserves_saved_manual_edits() {
+    use epub_reference_core::sigil::Target;
+    let d = tempdir().unwrap();
+    let p = d.path().join("original.epub");
+    epub(&p, &body(true), "Sample", "Writer");
+    let hash = book::file_hash(&p).unwrap();
+    let ws = Workspace::new(d.path().join("workspace")).unwrap();
+    let j = ws.analyze(&p).unwrap();
+    let index = j
+        .findings
+        .iter()
+        .position(|f| f.kind == "Joined words")
+        .unwrap();
+    let handoff = ws.prepare_sigil(&j.id, Target::Finding { index }).unwrap();
+    assert_ne!(handoff.path, p);
+    assert_eq!(book::file_hash(&handoff.path).unwrap(), hash);
+    assert_eq!(handoff.member.as_deref(), Some("OEBPS/chapter.xhtml"));
+    assert!(handoff.line.is_some() && !handoff.search_text.is_empty());
+    assert!(handoff.notice.contains("not a passage-jump"));
+    let repeated = ws.prepare_sigil(&j.id, Target::Book).unwrap();
+    assert_eq!(repeated.path, handoff.path);
+    epub(&handoff.path, &body(false), "Sample", "Writer");
+    let edited_hash = book::file_hash(&handoff.path).unwrap();
+    let after = ws.prepare_sigil(&j.id, Target::Finding { index }).unwrap();
+    assert_eq!(book::file_hash(&after.path).unwrap(), edited_hash);
+    assert!(after.notice.contains("cannot be uniquely located"));
+    let review = ws.analyze_sigil(&j.id).unwrap();
+    assert_eq!(review.book_path, handoff.path);
+    assert_eq!(review.sigil.as_ref().unwrap().path, handoff.path);
+    assert_eq!(
+        ws.prepare_sigil(&review.id, Target::Book).unwrap().path,
+        handoff.path
+    );
+    assert_eq!(fs::read_dir(ws.path().join("sigil")).unwrap().count(), 1);
+    assert_eq!(book::file_hash(&p).unwrap(), hash);
+}
+
+#[test]
+fn sigil_legacy_findings_and_stale_targets_are_guarded() {
+    use epub_reference_core::sigil::Target;
+    let d = tempdir().unwrap();
+    let p = d.path().join("source.epub");
+    epub(&p, &body(true), "Sample", "Writer");
+    let ws = Workspace::new(d.path().join("workspace")).unwrap();
+    let j = ws.analyze(&p).unwrap();
+    let path = ws.path().join("jobs").join(format!("{}.json", j.id));
+    let mut legacy = serde_json::to_value(&j).unwrap();
+    for finding in legacy["findings"].as_array_mut().unwrap() {
+        finding.as_object_mut().unwrap().remove("start");
+        finding.as_object_mut().unwrap().remove("end");
+    }
+    legacy.as_object_mut().unwrap().remove("sigil");
+    fs::write(path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+    let target = ws
+        .prepare_sigil(&j.id, Target::Finding { index: 0 })
+        .unwrap();
+    assert!(target.line.is_some());
+    assert!(ws
+        .prepare_sigil(&j.id, Target::Finding { index: usize::MAX })
+        .is_err());
+    assert!(ws
+        .prepare_sigil(
+            &j.id,
+            Target::Change {
+                id: "invented".into()
+            }
+        )
+        .is_err());
+    epub(&p, &body(false), "Sample", "Writer");
+    assert!(ws.prepare_sigil(&j.id, Target::Book).is_err());
+}
+
+#[test]
+fn sigil_refuses_copy_symlinks_and_unregistered_export_paths() {
+    use epub_reference_core::sigil::Target;
+    let d = tempdir().unwrap();
+    let p = d.path().join("source.epub");
+    epub(&p, &body(true), "Sample", "Writer");
+    let ws = Workspace::new(d.path().join("workspace")).unwrap();
+    let j = ws.analyze(&p).unwrap();
+    assert!(ws
+        .prepare_sigil(&j.id, Target::Export { path: p.clone() })
+        .is_err());
+    let copy = ws.prepare_sigil(&j.id, Target::Book).unwrap().path;
+    fs::remove_file(&copy).unwrap();
+    std::os::unix::fs::symlink(&p, &copy).unwrap();
+    assert!(ws.prepare_sigil(&j.id, Target::Book).is_err());
+    assert!(ws.analyze_sigil(&j.id).is_err());
+}
+
+#[test]
+fn sigil_change_target_maps_to_xhtml_and_does_not_approve() {
+    use epub_reference_core::sigil::Target;
+    let d = tempdir().unwrap();
+    let p = d.path().join("source.epub");
+    let r = d.path().join("reference.epub");
+    epub(&p, &body(true), "Sample", "Writer");
+    epub(&r, &body(false), "Sample", "Writer");
+    let ws = Workspace::new(d.path().join("workspace")).unwrap();
+    let j = ws.analyze(&p).unwrap();
+    ws.import_reference(&j.id, &r).unwrap();
+    let j = ws.compare(&j.id, true).unwrap();
+    let e = &j.comparison.as_ref().unwrap().edits[0];
+    let handoff = ws
+        .prepare_sigil(&j.id, Target::Change { id: e.id.clone() })
+        .unwrap();
+    assert!(handoff.line.is_some());
+    assert!(ws.job(&j.id).unwrap().selected.is_empty());
+}
+
+#[test]
 #[ignore = "explicit network smoke test"]
 fn live_gutenberg_reference_download() {
     let metadata = Metadata {

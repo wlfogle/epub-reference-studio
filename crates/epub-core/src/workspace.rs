@@ -1,4 +1,4 @@
-use crate::{align, book, digest, now, ollama, online, Comparison, Finding, Metadata};
+use crate::{align, book, digest, now, ollama, online, sigil, Comparison, Finding, Metadata};
 use anyhow::{ensure, Context, Result};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
@@ -52,6 +52,8 @@ pub struct Job {
     pub updated: u64,
     #[serde(default)]
     pub ai: Option<ollama::Assessment>,
+    #[serde(default)]
+    pub sigil: Option<sigil::EditingCopy>,
 }
 
 #[derive(Clone)]
@@ -68,7 +70,7 @@ impl Workspace {
             "Application workspace must be outside Calibre libraries"
         );
         fs::set_permissions(&root, fs::Permissions::from_mode(0o700))?;
-        for d in ["jobs", "references", "search", "ai"] {
+        for d in ["jobs", "references", "search", "ai", "sigil"] {
             fs::create_dir_all(root.join(d))?;
             fs::set_permissions(root.join(d), fs::Permissions::from_mode(0o700))?;
         }
@@ -246,6 +248,11 @@ impl Workspace {
         {
             return Ok(j);
         }
+        let editing = self
+            .jobs()?
+            .into_iter()
+            .filter_map(|j| j.sigil)
+            .find(|copy| copy.path == path);
         let mut job = Job {
             id: uuid::Uuid::new_v4().simple().to_string(),
             book_path: path,
@@ -259,9 +266,155 @@ impl Workspace {
             exports: vec![],
             updated: now(),
             ai: None,
+            sigil: editing,
         };
         self.save(&mut job)?;
         Ok(job)
+    }
+
+    pub fn prepare_sigil(&self, id: &str, target: sigil::Target) -> Result<sigil::Handoff> {
+        let _guard = self.lock()?;
+        let mut job = self.job(id)?;
+        if let sigil::Target::Export { path } = &target {
+            ensure!(
+                job.exports.contains(path),
+                "This export does not belong to the review"
+            );
+            ensure!(
+                !fs::symlink_metadata(path)?.file_type().is_symlink(),
+                "Export cannot be a symlink"
+            );
+            let path = path.canonicalize()?;
+            ensure!(
+                !path.ancestors().any(|p| p.join("metadata.db").exists()),
+                "Never open a Calibre original for editing"
+            );
+            book::read(&path)?;
+            return Ok(sigil::Handoff {
+                path, member: None, line: None, search_text: String::new(), context: String::new(),
+                notice: "Editing a corrected export, not the Calibre original. Save/close an existing Sigil window for this file before opening it again.".into(),
+                editor: String::new(),
+            });
+        }
+        let original = book::read(&job.book_path)?;
+        ensure!(
+            original.sha256 == job.input_sha256,
+            "Original changed; analyze again"
+        );
+        let offset = match target {
+            sigil::Target::Finding { index } => {
+                let selected = job
+                    .findings
+                    .get(index)
+                    .context("Stale finding index; reopen the review")?;
+                let current = original
+                    .findings
+                    .get(index)
+                    .filter(|f| {
+                        f.kind == selected.kind
+                            && f.location == selected.location
+                            && f.context == selected.context
+                    })
+                    .context("Finding changed; analyze the original again")?;
+                Some((
+                    current.start.context("Finding has no offset")?,
+                    current.end.context("Finding has no offset")?,
+                    current.location.clone(),
+                ))
+            }
+            sigil::Target::Change { id } => {
+                let edit = job
+                    .comparison
+                    .as_ref()
+                    .context("No comparison")?
+                    .edits
+                    .iter()
+                    .find(|e| e.id == id)
+                    .context("Stale correction ID")?;
+                ensure!(
+                    original.text.get(edit.start..edit.end) == Some(edit.before.as_str()),
+                    "Correction no longer matches the original"
+                );
+                Some((edit.start, edit.end, edit.location.clone()))
+            }
+            sigil::Target::Book => None,
+            sigil::Target::Export { .. } => unreachable!(),
+        };
+        if job.sigil.is_none() {
+            let destination = self
+                .root
+                .join("sigil")
+                .join(format!("editable-{}.epub", job.id));
+            sigil::copy(&job.book_path, &destination, &job.input_sha256)?;
+            job.sigil = Some(sigil::EditingCopy {
+                path: destination,
+                source: job.book_path.clone(),
+                original_sha256: job.input_sha256.clone(),
+                created: now(),
+                process: None,
+            });
+            self.save(&mut job)?;
+        }
+        let editing = job.sigil.as_ref().context("No editing copy")?;
+        let path = sigil::existing_path(&self.root.join("sigil"), &editing.path)?;
+        let copy = book::read(&path)?;
+        let mut handoff = if let Some((start, end, member)) = offset {
+            if copy.sha256 == original.sha256 {
+                sigil::locate(&copy, &member, start, end)
+            } else {
+                let needle = &original.text[start..end];
+                let hits: Vec<_> = if needle.is_empty() {
+                    vec![]
+                } else {
+                    copy.text
+                        .match_indices(needle)
+                        .filter(|(p, _)| copy.location(*p) == member)
+                        .take(2)
+                        .map(|(p, _)| p)
+                        .collect()
+                };
+                if hits.len() == 1 {
+                    sigil::locate(&copy, &member, hits[0], hits[0] + needle.len())
+                } else {
+                    sigil::Handoff {
+                        path: path.clone(), member: Some(member), line: None, search_text: String::new(),
+                        context: book::context(&original.text, start, end),
+                        notice: "This working copy was edited and the old passage cannot be uniquely located. Nothing was overwritten. Save it in Sigil and re-analyze the saved copy for current findings.".into(),
+                        editor: String::new(),
+                    }
+                }
+            }
+        } else {
+            sigil::Handoff {
+                path: path.clone(), member: None, line: None, search_text: String::new(), context: String::new(),
+                notice: "This is a persistent editable copy, never the Calibre original. Save your edits in Sigil, then re-analyze this saved copy. Location hints reflect saved text; unsaved editor changes may move them.".into(),
+                editor: String::new(),
+            }
+        };
+        handoff.path = path;
+        Ok(handoff)
+    }
+
+    pub fn record_sigil_process(
+        &self,
+        id: &str,
+        path: &Path,
+        process: sigil::EditorProcess,
+    ) -> Result<()> {
+        let _guard = self.lock()?;
+        let mut job = self.job(id)?;
+        if let Some(copy) = job.sigil.as_mut().filter(|c| c.path == path) {
+            copy.process = Some(process);
+            self.save(&mut job)?;
+        }
+        Ok(())
+    }
+
+    pub fn analyze_sigil(&self, id: &str) -> Result<Job> {
+        let job = self.job(id)?;
+        let copy = job.sigil.context("Open an editable Sigil copy first")?;
+        let path = sigil::existing_path(&self.root.join("sigil"), &copy.path)?;
+        self.analyze(&path)
     }
 
     pub fn search(&self, id: &str, query: &str, refresh: bool) -> Result<Job> {

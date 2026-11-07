@@ -318,6 +318,8 @@ pub fn detect(book: &Book) -> Vec<Finding> {
                 location: book.location(m.start()),
                 context: context(&book.text, m.start(), m.end()),
                 explanation: explanation.into(),
+                start: Some(m.start()),
+                end: Some(m.end()),
             });
         }
     }
@@ -341,6 +343,8 @@ pub fn detect(book: &Book) -> Vec<Finding> {
                 location: book.location(m.start()),
                 context: context(&book.text, m.start(), m.end()),
                 explanation: format!("“{joined}” occurs elsewhere intact; verify before joining."),
+                start: Some(m.start()),
+                end: Some(m.end()),
             });
         }
         if findings.len() >= 2000 {

@@ -16,6 +16,17 @@ window.__TAURI__ = {
     ] }, jobs: [], workspace: "/private/fixture", ollama: { endpoint:"http://127.0.0.1:11434",model:"qwen3.5:4b" } };
     if (action === "models") return [{ name:"qwen3.5:4b",size:3324173934,digest:"fixture-model" }];
     if (action === "save_ai") return data.config;
+    if (action === "copy_sigil_search") { window.__COPIED_SIGIL__ = data.text; return null; }
+    if (action === "open_sigil") {
+      if (data.target.kind !== "export") job.sigil = { path:"/private/sigil/editable.epub",source:job.book_path,original_sha256:"original",created:1 };
+      return { path:data.target.kind === "export" ? data.target.path : job.sigil.path,
+        member:"chapter.xhtml",line:7,search_text:"ofVarnal",context:"The path ofVarnal.",
+        notice:"Open the listed chapter. Sigil has no direct passage-jump argument.",editor:"Sigil (fixture)" };
+    }
+    if (action === "analyze_sigil") {
+      job = { ...job,id:"b".repeat(32),book_path:job.sigil.path,comparison:null,reference:null,selected:[],exports:[] };
+      return structuredClone(job);
+    }
     if (action === "analyze" || action === "job") return structuredClone(job);
     if (action === "assist") {
       const selected = [...job.selected];
@@ -65,6 +76,10 @@ window.__RUN_UI_TEST__ = async () => {
   if (!document.querySelector("#ollamaStatus").textContent.includes("qwen3.5:4b")) throw Error("Local model not connected");
   if (window.pwned || document.querySelector("#detail img")) throw Error("Untrusted ebook content executed");
   if (!document.querySelector("#detail").textContent.includes("ofVarnal")) throw Error("No text finding shown");
+  await click("Open in Sigil");
+  if (job.book_path !== "/fixture/book.epub" || !document.querySelector("#detail").textContent.includes("source line hint 7")) throw Error("Unsafe/missing Sigil handoff");
+  await click("Copy search text");
+  if (window.__COPIED_SIGIL__ !== "ofVarnal") throw Error("Sigil search text not copied");
   await click("Ask Ollama about first 8 suspects");
   if (!document.querySelector("#detail").textContent.includes("Ollama advisory assessment")) throw Error("AI advice missing");
   if (job.selected.length) throw Error("AI approved a change");
@@ -81,5 +96,8 @@ window.__RUN_UI_TEST__ = async () => {
   await wait(ready);
   await click("Export 1 reviewed changes");
   if (!document.querySelector("#detail").textContent.includes("/fixture/exports/corrected.epub")) throw Error("Export history missing");
-  return { status: "passed", checks: ["library", "XSS-safe text", "findings", "Ollama connection/advice", "online search", "download", "edition gate", "diff", "review", "export"] };
+  await click("Open export in Sigil");
+  await click("Re-analyze saved Sigil copy");
+  if (job.book_path !== "/private/sigil/editable.epub" || !document.querySelector("#detail").textContent.includes(job.book_path)) throw Error("Saved-copy re-analysis missing");
+  return { status: "passed", checks: ["library", "XSS-safe text", "findings", "Sigil handoff/copy/re-analysis", "Ollama connection/advice", "online search", "download", "edition gate", "diff", "review", "export"] };
 };

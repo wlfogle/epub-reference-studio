@@ -15,6 +15,23 @@ The installed executable is `~/.local/lib/epub-reference-studio/epub-reference-s
 4. **Confirm work and edition:** check the edition/translation/abridgment confirmation and compare. Unique five-token anchors plus bounded local alignment identify small differences. Inadequate textual agreement is refused; large/unmatched regions remain unrepaired. This is an alignment measurement, not a probability that every reference sentence is correct.
 5. **Review & export:** approve individual differences or inspect/select the spacing proposals. Nothing is selected automatically. Export to a directory **outside Calibre**. The original is never overwritten; the app does not edit `metadata.db`. Inspect the corrected copy in your reader before importing it into Calibre through Calibre's normal UI.
 
+## Edit flagged passages in Sigil
+**Open in Sigil** appears beside each suspect passage and proposed reference correction. **Open editable copy in Sigil** is also available at the top of a book review, and corrected exports have their own **Open export in Sigil** action.
+
+The app discovers native `sigil` or the installed `com.sigil_ebook.Sigil` Flatpak. Flatpak launches use documented file forwarding, without shell interpolation, installing plugins or changing sandbox permissions. A missing editor produces a clear error before an editing copy is prepared.
+
+For findings/corrections, the first click creates a byte-verified, owner-private working EPUB under the app workspace's `sigil/` directory. Later passages reuse that same file. Existing manual edits are never replaced with a fresh source copy. Source hashes and target IDs/indices are checked; stale reviews, symlinked copies and unregistered export paths are refused. Legacy saved findings without offsets are re-located from the unchanged original.
+
+Sigil 2.8.5 accepts an EPUB filename but **does not provide a CLI passage-jump option**. The Studio handoff panel therefore shows the chapter/member, source-line hint, passage context and a raw-XHTML search excerpt. In Sigil's Book Browser open that member, then use the hint or paste the excerpt into Find & Replace in **Normal** mode. Inline formatting/entities can make a visible word differ from its raw XHTML; the chapter/line hint remains useful. These are hints for the saved file, not guaranteed positions after Sigil prettification or unsaved changes. No IDs, reading order, TOC or book content are rewritten merely to navigate.
+
+**Copy search text** changes the clipboard only when explicitly requested; the app never reads the prior clipboard. It uses existing `xsel` on X11 or `wl-copy` on Wayland. If unavailable, select the displayed read-only text and press Ctrl+C. Opening a passage does not silently replace your clipboard.
+
+A tracked live Sigil process for the same working copy is reused rather than launching a duplicate. PID start-time checks prevent PID-reuse mistakes. If you opened a copy independently, save/close that separate editor before reopening it through Studio; arbitrary external or delegated editor windows cannot be detected reliably. The app never forces a Sigil save or closes your editor.
+
+After editing, save in Sigil (Ctrl+S), then choose **Re-analyze saved Sigil copy**. Studio creates/reuses a review of that saved working file, retains its existing editing-copy binding and does not alter the original review or Calibre book. If earlier text was edited away or became ambiguous, stale passage hints are not guessed: re-analysis supplies fresh findings. A corrected export is already a separate editable file; to analyze an edited export, select it with **Open an EPUB**. Import final copies into Calibre through Calibre itself.
+
+Private launch diagnostics are appended to `sigil-launch.log` in the workspace. Sigil is a GUI application: do not invoke `sigil --help` as a capability probe—it starts the GUI rather than printing command help. Navigation limits were checked against [Sigil 2.8.5's launcher](https://github.com/Sigil-Ebook/Sigil/blob/2.8.5/src/main.cpp) and the [Book Browser guide](https://sigil-ebook.com/sigil-user-guide/epub_content/guide/OEBPS/Text/book_browser.xhtml).
+
 ## Online reference sources
 - **Project Gutenberg's official OPDS feed** is the primary machine-readable discovery source. The app uses its documented `/ebooks/search.opds/` API, not a scraper of human search pages.
 - **Gutendex** is an alternative Gutenberg metadata service, used if official discovery provides no compatible downloadable candidate. It can time out; that is reported rather than disguised as a successful lookup.
@@ -52,10 +69,13 @@ Limits: 128 MiB compressed EPUB, 256 MiB total declared expansion, 32 MiB indivi
 - `cargo test -p epub-reference-core`
 - `node --check ui/app.js` (optional syntax check when Node is installed)
 - `/usr/bin/python3 tests/ui_webkit.py` (installed GTK/WebKit introspection and a graphical display required)
+- `python3 tests/sigil_native.py` (opt-in real X11 desktop test; requires built release, installed Sigil, xdotool, ImageMagick and tesseract; keep keyboard/mouse idle)
 - `cargo test -p epub-reference-core live_gutenberg_reference_download -- --ignored --nocapture` (explicit public-domain network check)
 - `cargo test -p epub-reference-core live_local_ollama_assessment_preserves_review_and_uses_cache -- --ignored --nocapture` (explicit installed local model check; fictional excerpts)
 
 Offline tests create synthetic EPUBs only. They exercise actual parsing, cross-span corrections, entities/Unicode, alignment, false-identity rejection, unchanged-reference behavior, resource preservation, stale hashes, no-overwrite and Calibre-directory refusal, saved reviews and cancellation. The WebKit test drives the real UI with fictional IPC fixtures and checks safe text rendering, online-source UI, confirmation, diff selection and export. The opt-in live test discovers and downloads a real matching public-domain book through the production network code.
 
 ### Verified build
-On the development Pop!_OS workstation: 14 offline Rust tests, the live Gutenberg discovery/download test, the actual local Ollama assessment/cache test, strict Clippy, Python/JavaScript checks and the WebKit UI workflow passed. The optimized native application was built, installed and opened on the selected Calibre EPUB. Its read-only scan reported 196 heuristic findings with an unchanged original SHA-256. Those findings are not 196 certified errors, and no production book was automatically corrected or replaced.
+On the development Pop!_OS workstation: 20 offline Rust tests, strict Clippy, Python/JavaScript checks, the WebKit UI workflow and the real native-to-Flatpak Sigil handoff passed. The Sigil test uses only a private synthetic EPUB, verifies a real editor window for the working copy and an unchanged source SHA-256, and closes only its own fixture windows. Prior live Gutenberg discovery/download and actual local Ollama assessment/cache tests also passed.
+
+The optimized native application was built, installed and opened on the selected Calibre EPUB. Its read-only scan reported 196 heuristic findings with an unchanged original SHA-256. Those findings are not 196 certified errors, and no production book was automatically corrected or replaced.
